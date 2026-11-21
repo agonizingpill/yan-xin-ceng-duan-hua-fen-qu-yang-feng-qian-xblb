@@ -30,4 +30,7 @@ def withdraw(s,id,u):
     if x.state not in ['ready','failed','confirmed']:raise HTTPException(409,'仅已完成/失败解释可撤销重编')
     ids=s.scalars(select(Stratum.id).where(Stratum.interpretation_id==id)).all()
     if ids and s.scalar(select(SampleInterval.id).where(SampleInterval.stratum_id.in_(ids))):raise HTTPException(409,'已有取样引用层面，禁止撤销解释')
+    # 撤回先办成：剖面只做状态留痕，不因剖面发布失败而回滚撤回。
+    from . import correlation_service as correlation
+    correlation.mark_source_withdrawn(s,id,u)
     x.state='withdrawn';audit(s,u,'撤销解释，允许重测重编');return pack(x)

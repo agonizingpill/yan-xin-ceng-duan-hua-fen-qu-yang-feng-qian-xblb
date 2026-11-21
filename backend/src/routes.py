@@ -2,15 +2,15 @@ from fastapi import APIRouter,Depends
 from sqlalchemy import select
 from .database import Session
 from .security import current,allow
-from .common import pack,audit,hole
-from .models import Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision,Audit
-from .schemas import HoleInput,RunInput,ReadingInput,MissingInput,Reason,BoreholeRef,Layers,SampleInput,SealInput,CustodyInput,RevisionInput
-from . import drilling_service as drilling,strata_service as strata,sample_service as sampling,custody_service as custody,revision_service as revision
+from .common import pack,audit,hole,get
+from .models import Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision,CorrelationProfile,Audit
+from .schemas import HoleInput,RunInput,ReadingInput,MissingInput,Reason,BoreholeRef,Layers,SampleInput,SealInput,CustodyInput,RevisionInput,CorrelationInput,Anchors,PublishInput
+from . import drilling_service as drilling,strata_service as strata,sample_service as sampling,custody_service as custody,revision_service as revision,correlation_service as correlation
 router=APIRouter()
 def permissions(u,controlled=False):allow(u,*(['supervisor']if controlled else['operator','supervisor']))
 @router.get('/register')
 def register(u=Depends(current)):
-    with Session()as s:return {name:[pack(x)for x in s.scalars(select(cls).order_by(cls.id))]for name,cls in [('boreholes',Borehole),('runs',CoreRun),('readings',Reading),('missing',MissingInterval),('interpretations',Interpretation),('strata',Stratum),('samples',SampleInterval),('seals',Seal),('custodies',Custody),('revisions',ColumnRevision)]}
+    with Session()as s:return {name:[pack(x)for x in s.scalars(select(cls).order_by(cls.id))]for name,cls in [('boreholes',Borehole),('runs',CoreRun),('readings',Reading),('missing',MissingInterval),('interpretations',Interpretation),('strata',Stratum),('samples',SampleInterval),('seals',Seal),('custodies',Custody),('revisions',ColumnRevision),('correlations',CorrelationProfile)]}
 @router.get('/audit')
 def history(u=Depends(current)):
     with Session()as s:return [pack(x)for x in s.scalars(select(Audit).order_by(Audit.id.desc()).limit(35))]
@@ -97,3 +97,34 @@ def new_revision(p:RevisionInput,u=Depends(current)):
 def freeze(id:int,u=Depends(current)):
     permissions(u,True)
     with Session.begin()as s:return revision.freeze(s,id,u)
+@router.post('/correlations')
+def new_correlation(p:CorrelationInput,u=Depends(current)):
+    permissions(u)
+    with Session.begin()as s:return correlation.create(s,p,u)
+@router.get('/correlations/{id}')
+def get_correlation(id:int,u=Depends(current)):
+    with Session()as s:return pack(get(s,CorrelationProfile,id))
+@router.put('/correlations/{id}/anchors')
+def correlation_anchors(id:int,p:Anchors,u=Depends(current)):
+    permissions(u)
+    conflict=None
+    with Session.begin()as s:
+        try:return correlation.update_anchors(s,id,p,u)
+        except correlation.AnchorConflict as e:conflict=str(e)
+    # 矛盾已让剖面退回草案并留档；此处再返回 409，前端可提示后重看草稿。
+    from fastapi import HTTPException
+    raise HTTPException(409,conflict)
+@router.post('/correlations/{id}/rebind')
+def correlation_rebind(id:int,u=Depends(current)):
+    permissions(u)
+    with Session.begin()as s:return correlation.rebind(s,id,u)
+@router.post('/correlations/{id}/publish')
+def correlation_publish(id:int,p:PublishInput,u=Depends(current)):
+    permissions(u,True)
+    blocked=None
+    with Session.begin()as s:
+        try:return correlation.publish(s,id,p,u)
+        except correlation.PublishBlocked as e:blocked=str(e)
+    # 剖面已留待复核并提交留痕，再以 409 告知前端需要复核。
+    from fastapi import HTTPException
+    raise HTTPException(409,blocked)

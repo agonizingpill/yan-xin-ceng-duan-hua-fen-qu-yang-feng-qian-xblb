@@ -2,7 +2,7 @@ import json
 import numpy as np
 from sqlalchemy import select
 from src.database import Session,Base,engine
-from src.models import User,Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision
+from src.models import User,Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision,CorrelationProfile
 from src.security import password_hash
 
 def seed():
@@ -22,5 +22,21 @@ def seed():
                     s.add(Reading(borehole_id=h.id,run_id=run.id,depth_m=float(depth),density=round(float(center[0]+rng.normal(0,.035)),4),susceptibility=round(float(center[1]+rng.normal(0,1.5)),4),velocity=round(float(center[2]+rng.normal(0,55)),3)))
             s.add(MissingInterval(borehole_id=h.id,start_m=12,end_m=13,state='observed',reason=''))
             legacy=Interpretation(borehole_id=h.id,state='historical',evidence={'note':'旧纸本区间来源，仅保留既有切样，不替代新GMM解释'});s.add(legacy);s.flush();st=Stratum(interpretation_id=legacy.id,start_m=0,end_m=12,lithology='旧编录砂岩',contact_note='纸本编录回录，仅保留历史取样依据');s.add(st);s.flush();sample=SampleInterval(borehole_id=h.id,stratum_id=st.id,code='CS-031-OLD',start_m=8,end_m=9,purpose='历史抗压试验',destructive=True,state='broken');s.add(sample);s.flush();s.add(Seal(sample_id=sample.id,code='CX031-001',state='broken',reason='运输交接发现铅封裂口，待现场核样重封',sealed_by='operator@liheng.local',snapshot={'code':sample.code,'start_m':8,'end_m':9,'source':'历史纸本'}))
-    with Session()as s:return {cls.__tablename__:len(s.scalars(select(cls)).all())for cls in [User,Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision]}
+        # 相邻钻孔：BH-32 与 BH-31 同线相邻，层序少一层（24—36m 细分层在 BH-32 尖灭），12—13m 同样缺芯。
+        b2=s.scalar(select(Borehole).where(Borehole.code=='BH-32'))
+        if not b2:
+            b2=Borehole(code='BH-32',site='砾衡青石沟东线 / ZK-32',total_depth=33,cut_quota=5);s.add(b2);s.flush()
+            rng=np.random.default_rng(43)
+            for code,start,end,recovered in [('R01',0,17,16.4),('R02',17,33,16)]:
+                run=CoreRun(borehole_id=b2.id,code=code,start_m=start,end_m=end,recovered_m=recovered);s.add(run);s.flush()
+                for depth in np.arange(start+.5,end,1):
+                    if depth==12.5:continue
+                    if depth<12:center=(2.12,12.6,2220)
+                    elif depth<24:center=(2.58,49,4080)
+                    else:center=(3.14,101,6180)
+                    s.add(Reading(borehole_id=b2.id,run_id=run.id,depth_m=float(depth),density=round(float(center[0]+rng.normal(0,.035)),4),susceptibility=round(float(center[1]+rng.normal(0,1.5)),4),velocity=round(float(center[2]+rng.normal(0,55)),3)))
+            s.add(MissingInterval(borehole_id=b2.id,start_m=12,end_m=13,state='observed',reason=''))
+            it2=Interpretation(borehole_id=b2.id,state='historical',evidence={'note':'旧纸本区间来源，仅保留既有切样，不替代新GMM解释'});s.add(it2);s.flush()
+            st2=Stratum(interpretation_id=it2.id,start_m=0,end_m=12,lithology='旧编录砂岩',contact_note='纸本编录回录，仅保留历史取样依据');s.add(st2)
+    with Session()as s:return {cls.__tablename__:len(s.scalars(select(cls)).all())for cls in [User,Borehole,CoreRun,Reading,MissingInterval,Interpretation,Stratum,SampleInterval,Seal,Custody,ColumnRevision,CorrelationProfile]}
 if __name__=='__main__':print(json.dumps(seed(),ensure_ascii=False))

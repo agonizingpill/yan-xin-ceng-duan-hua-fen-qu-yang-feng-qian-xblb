@@ -53,3 +53,16 @@ class RevisionInput(Clean):
     borehole_id:int
     version:str=Field(min_length=2,max_length=40)
     note:str=Field(min_length=8,max_length=600)
+class CorrelationInput(Clean):
+    left_borehole_id:int
+    right_borehole_id:int
+    note:str=Field(min_length=8,max_length=600)
+class AnchorInput(Clean):
+    left_stratum_id:int
+    right_stratum_id:int
+    note:str=Field(default='',max_length=600)
+class Anchors(Clean):
+    anchors:list[AnchorInput]=Field(default_factory=list,max_length=40)
+    note:str|None=Field(default=None,min_length=8,max_length=600)
+class PublishInput(Clean):
+    note:str|None=Field(default=None,min_length=8,max_length=600)
